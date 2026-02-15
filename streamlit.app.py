@@ -1,67 +1,55 @@
 # Import python packages
 import streamlit as st
-import pandas as pd
-from snowflake.snowpark.context import get_active_session
+##from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col
 
 
 # Write directly to the app
-st.title(f"Pending Smoothie Orders :cup_with_straw:")
+st.title(f"Customize Your Smoothie :cup_with_straw:")
 st.write(
   """
-  **Orders that need to be filled!!**.
+  **Choose the fruits you want in your Smoothie!!**.
   """
 )
 
-session = get_active_session()
-##my_dataframe = session.table("smoothies.public.orders").filter(col("ORDER_FILLED")==0).collect()
+cnx = st.connection("snowflake")
+session = cnx.session()
+##session = get_active_session()
+my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'))
 ##st.dataframe(data=my_dataframe, use_container_width='TRUE')
 
-pending_rows = (
-    session
-        .table("smoothies.public.orders")
-        .select("order_uid","NAME_ON_ORDER", "INGREDIENTS","order_filled")
-        .filter(col("ORDER_FILLED") == 0)
-        .collect()
+name_on_order = st.text_input (
+    "**Name on Smoothie:** "
+).strip()
+
+st.write("The name on your Smoothie will be **"+ name_on_order+"**")
+
+
+ingredients_list = st.multiselect(
+    "**Chose up to 5 ingredients?**"
+    ,my_dataframe
+    ,max_selections=5
 )
 
-pending_df = pd.DataFrame([r.as_dict() for r in pending_rows])
+if ingredients_list: 
 
-if pending_df.empty:
-  st.info("No pending orders!!!")
-  st.stop()
+    ingredients_string = ''
+    time_to_insert = ''
 
-if "FILL" not in pending_df.columns:
-    pending_df.insert(0,"FILL", False)
+    for fruit_chosen in ingredients_list:
+        ingredients_string += fruit_chosen + ' '
 
-edited_df = st.data_editor(
-    pending_df,
-    hide_index=True,
-    use_container_width=True,
-    column_order=["FILL", "NAME_ON_ORDER", "INGREDIENTS", "ORDER_UID", "ORDER_FILLED"],
-    disabled=[ "NAME_ON_ORDER", "INGREDIENTS", "ORDER_UID", "ORDER_FILLED"],
-    column_config={
-        "FILL": st.column_config.CheckboxColumn("Fill? ✅", default=False),
-        "NAME_ON_ORDER": st.column_config.TextColumn("Name on order"),
-        "INGREDIENTS": st.column_config.TextColumn("Ingredients"),
-        "ORDER_UID": st.column_config.TextColumn("Order UID"),
-        "ORDER_FILLED": st.column_config.CheckboxColumn("Already filled", disabled=True),
-    },
-)
+    #st.write(ingredients_string)
 
+    my_insert_stmt = """ insert into smoothies.public.orders(NAME_ON_ORDER, ingredients)
+            values ('""" + name_on_order + """','""" + ingredients_string + """')"""
 
-if st.button("Submit", icon=":material/thumb_up:"):
-    selected_uids = edited_df.loc[edited_df["FILL"] == True, "ORDER_UID"].tolist()
+    #st.write(my_insert_stmt)
 
-    if not selected_uids:
-        st.warning("No orders selected.")
-    else:
-        # Atualiza com Snowpark (evita concatenar SQL)
-        orders_table = session.table("smoothies.public.orders")
-        orders_table.update(
-            {"ORDER_FILLED": True},
-            col("ORDER_UID").isin(selected_uids)
-        )
+    
+    time_to_insert = st.button('Sumit Order')
 
-        st.success(f"Updated {len(selected_uids)} order(s) ✅", icon="✅")
-        st.rerun()
+    if time_to_insert:
+       session.sql(my_insert_stmt).collect()
+        
+       st.success('Your Smoothie is ordered!', icon="✅")
